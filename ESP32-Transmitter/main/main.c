@@ -1,66 +1,75 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
 #include "esp_wifi.h"
 #include "esp_now.h"
 #include "nvs_flash.h"
-#include <stdio.h>
-#include <string.h>
-#include <driver/gpio.h>
+#include "esp_log.h"
+// ESP MAC addresses
+const uint8_t esp_reciever_mac[] = {0x3C, 0x8A, 0x1F, 0x7F, 0x35, 0x54};
 
-// MAC addresses
-uint8_t esp2_mac[] = {0x3C, 0x8A, 0x1F, 0x7F, 0x35, 0x54};
+typedef struct{
+    uint8_t led_device;
+    uint8_t hue;
+    uint8_t sat;
+    uint8_t val;
+} led_msg_t;
+
+typedef struct{
+    uint8_t motor_device;
+    uint8_t speed;
+    uint8_t direction;
+    uint8_t reserved;
+} motor_msg_t;
 
 void wifi_setup(){
-    
-    const wifi_init_config_t WICD = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&WICD));
+    const wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_channel(1,WIFI_SECOND_CHAN_NONE));
-
 }
 
-void app_main(void)
-{
+void espnow_setup(const uint8_t *mac_address){
+    uint8_t peer_mac[6];
+    memcpy(peer_mac, mac_address, 6);
 
-nvs_flash_init();
-wifi_setup();
+    ESP_ERROR_CHECK(esp_now_init());
+    
+    esp_now_peer_info_t esp;
+    memset(&esp, 0, sizeof(esp));
+    memcpy(esp.peer_addr, peer_mac, 6);
+    esp.channel = 1;
+    esp.ifidx = WIFI_IF_STA;
+    esp.encrypt = false;
 
-// Setup of ESPNOW
-ESP_ERROR_CHECK(esp_now_init());
+    ESP_ERROR_CHECK(esp_now_add_peer(&esp));
+}
 
-esp_now_peer_info_t esp2;
-memset(&esp2, 0, sizeof(esp2));
-memcpy(esp2.peer_addr, esp2_mac, 6);
-esp2.channel = 1;
-esp2.ifidx = WIFI_IF_STA;
-esp2.encrypt = false;
+void app_main(void){
 
-ESP_ERROR_CHECK(esp_now_add_peer(&esp2));
+    nvs_flash_init();
+    wifi_setup();
+    espnow_setup(esp_reciever_mac);
 
+    led_msg_t led_data;
+    led_data.led_device = 0;
+    led_data.hue = 0;
+    led_data.sat = 100;
+    led_data.val = 100;
+    
+    motor_msg_t motor_data;
+    motor_data.motor_device = 1;
+    motor_data.speed = 0;
+    motor_data.direction = 0;
+    motor_data.reserved =0;
+    
 
-// PIN 0 configuration
-gpio_config_t pin0;
-pin0.pin_bit_mask  = 1ULL << 4;
-pin0.mode = GPIO_MODE_INPUT;
-pin0.pull_up_en = GPIO_PULLUP_ENABLE;
-pin0.pull_down_en = GPIO_PULLDOWN_DISABLE;
-pin0.intr_type = GPIO_INTR_DISABLE;
-
-ESP_ERROR_CHECK(gpio_config(&pin0));
-
-// Sending Data
-while(1){
-
-    int level = gpio_get_level(4);
-    if(level == 0){
-        uint8_t x = 1;
-        ESP_ERROR_CHECK(esp_now_send(esp2.peer_addr,&x, sizeof(x)));
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-    else{
-        uint8_t x = 0;
-        ESP_ERROR_CHECK(esp_now_send(esp2.peer_addr,&x, sizeof(x)));
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-
-    }
+    ESP_ERROR_CHECK(esp_now_send(esp_reciever_mac,(const uint8_t*)&led_data, sizeof(led_data)));
+    ESP_LOGI("SENT","LED DATA");
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    ESP_ERROR_CHECK(esp_now_send(esp_reciever_mac,(const uint8_t*)&motor_data, sizeof(motor_data)));
+    ESP_LOGI("SENT","MOTOR DATA");
 }
