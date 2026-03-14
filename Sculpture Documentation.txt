@@ -1,0 +1,103 @@
+ESP-WROOM-32 Documentation for Sculpture
+
+
+
+# Last Update: 2/12/2026
+
+	To install the ESP32 extension for Visual Studio Code follow the guide provided below:
+
+		(https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/installation.html)
+		# Use along side this documentation		
+
+		Select download server: GitHub
+		Select ESP-IDF version: Latest release
+		Enter ESP-IDF container directory: Leave default
+		Enter ESP-IDF Tools directory (IDF_TOOLS_PATH): Leave default
+		Select Python version: Leave default
+
+	To start a new project:
+
+		Go to view > command palette in VS Code and type "ESP-IDF: New Project"
+
+		Choose ESP-IDF Target (IDF_TARGET): ESP32
+		Choose ESP-IDF Board: Custom Board
+		Choose serial port: no port
+
+		OpenOCD Configuration files (Relative paths to OPENOCD_SCRIPTS): Leave as is
+		# USB-to-UART is used instead of JTAG
+
+		Add your ESP-IDF Component directory: Should be left blank 
+		# Unless you have additional external libraries to include
+
+		The example template:
+			
+			Go to ESP-IDF > peripherals > rmt > led_strip
+		
+		Create Project
+	
+	To build project:
+		
+		In VS code go to View > Command Palette and type "ESP-IDF: Build your Project"
+
+	To flash device:
+		
+		In VS code go to View > Command Palette and type "ESP-IDF: Select Port to Use": Select COM
+
+		Go to View > Command Palette and type "ESP-IDF: Flash your Project": Select UART
+	
+
+# Last Update: 2/12/2026
+
+	Licenses
+		- https://chocolatey.org/packages/chocolatey
+		- https://chocolatey.org/packages/python
+		- https://chocolatey.org/packages/visualstudio2019-workload-vctools
+
+
+# Last Update: 2/12/2026
+
+		Espressif Systems API reference (https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/index.html)
+
+	Wireless Communication:
+
+		WIFI API reference (https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/network/esp_wifi.html)
+		ESPNOW API reference (https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/network/esp_now.html)
+		
+		MAC addresses:
+			ESP 1 - 3c:8a:1f:76:a3:e8
+			ESP 2 - 3c:8a:1f:7f:35:54
+			ESP 3 - 3c:8a:1f:76:de:44
+			ESP 4 -
+			ESP 5 - 
+			ESP 6 -
+			ESP 7 - 
+			ESP 8 -
+			ESP 9 - 
+			ESP 10 -
+
+	Peripherals:
+		
+		GPIO API reference (https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/gpio.html)
+		
+	LEDs:
+		RMT API reference (https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html#api-reference)
+
+	Program Architecture:
+
+	ESPNOW standby  -> receive data -> send to queue -> ESPNOW standby
+	
+	pull data off queue -> determine target device -> control target device -> pull data off queue
+
+
+
+
+
+
+
+
+
+
+
+
+
+
