@@ -1,0 +1,371 @@
+#include <stdint.h>
+#include <string.h>
+
+#include "espnow_protocol.h"
+
+#include "esp_log.h"
+#include "nvs_flash.h"
+#include "esp_wifi.h"
+#include "esp_now.h"
+#include "driver/rmt_tx.h"
+#include "led_strip_encoder.h"
+#include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h" 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+
+// LED Configuration
+#define LED_NUMBERS 80
+#define LED_SIGNAL_GPIO 12
+
+// Motor Configuration
+#define MOTOR_PUL_GPIO 18 // BLUE wire
+#define MOTOR_DIR_GPIO 25 // ORANGE wire
+
+#define UPPER_LIMIT_GPIO 33
+#define LOWER_LIMIT_GPIO 19
+
+#define SAFEGUARD_LOW_FREQ 400
+
+const motor_msg_format_t e_stop = {
+    .mode = STOP,
+    .accel_mag = 2500,
+    .target_freq = SAFEGUARD_LOW_FREQ
+};
+
+typedef struct{
+    int direction;
+    int max_revolutions;
+    volatile int motor_revolutions;
+    volatile BaseType_t is_upper_limit_reached;
+    volatile BaseType_t is_lower_limit_reached;
+    QueueHandle_t queue;
+} motor_isr_t;
+
+motor_isr_t isr_data = {
+    .max_revolutions = 87,
+    .motor_revolutions = 0,
+    .is_upper_limit_reached = pdFALSE,
+    .is_lower_limit_reached = pdFALSE,
+    .queue = motor_msg_queue,
+};
+
+static QueueHandle_t led_msg_queue, motor_msg_queue;
+TaskHandle_t motor_stop_task_handle = NULL;
+
+// LED
+static rmt_channel_handle_t tx_channel = NULL; 
+
+static led_strip_encoder_config_t encoder_config = {
+    .resolution = 10000000,
+};
+
+static rmt_encoder_handle_t led_encoder = NULL;
+
+static rmt_transmit_config_t tx_config = {0};
+
+// MOTOR
+ledc_channel_config_t ledc_channel = {
+    .gpio_num       = MOTOR_PUL_GPIO,
+    .speed_mode     = LEDC_HIGH_SPEED_MODE,
+    .channel        = LEDC_CHANNEL_0,
+    .timer_sel      = LEDC_TIMER_0,
+    .duty           = 0, // Duty (how the signal is turned off)
+    .hpoint         = 0
+};
+
+ledc_timer_config_t ledc_timer = {
+    .speed_mode       = LEDC_HIGH_SPEED_MODE,
+    .duty_resolution  = LEDC_TIMER_8_BIT,
+    .timer_num        = LEDC_TIMER_0,
+    .freq_hz          = SAFEGUARD_LOW_FREQ,
+    .clk_cfg          = LEDC_USE_APB_CLK
+};
+
+void wifi_setup(){
+    const wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_channel(1,WIFI_SECOND_CHAN_NONE));
+}
+
+void received_data(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len){
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    if(data_len == sizeof(led_msg_format_t)){ // NEEDS TO BE FIXED
+        led_msg_format_t led_msg;
+        memcpy(&led_msg, data, sizeof(led_msg_format_t));
+
+        xQueueSendToBackFromISR(led_msg_queue, &led_msg, &xHigherPriorityTaskWoken);
+    }
+    else if(data_len == sizeof(motor_msg_format_t)){
+        motor_msg_format_t motor_msg;
+        memcpy(&motor_msg, data, sizeof(motor_msg_format_t));
+
+        xQueueSendToBackFromISR(motor_msg_queue, &motor_msg, &xHigherPriorityTaskWoken);
+    }
+    else{
+        ESP_LOGE("RECEIVED_DATA:", "DATA INVALID,%d",data_len);
+    }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+void rmt_setup(){ 
+    ESP_LOGI("RMT_SETUP:", "Create RMT TX channel");
+    rmt_tx_channel_config_t tx_chan_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .gpio_num = LED_SIGNAL_GPIO,
+        .mem_block_symbols = 64, // increase the block size can make the LED less flickering
+        .resolution_hz = 10000000,
+        .trans_queue_depth = 4, 
+    };
+    ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_chan_config, &tx_channel));
+    
+    ESP_LOGI("RMT_SETUP:", "Enable RMT TX channel");
+    ESP_ERROR_CHECK(rmt_enable(tx_channel));
+}
+
+void led_control(led_msg_format_t *msg){
+    static uint8_t led_strip_pixels[LED_NUMBERS * 3]; // initialized to 0 on startup
+    
+    uint8_t initial_g = led_strip_pixels[0];
+    uint8_t initial_r = led_strip_pixels[1];
+    uint8_t initial_b = led_strip_pixels[2];
+
+    int dg = msg->G_val - initial_g;
+    int dr = msg->R_val - initial_r;
+    int db = msg->B_val - initial_b;
+
+    uint8_t g;
+    uint8_t r;
+    uint8_t b;
+
+    // delta_step is between 0,60
+    uint8_t steps = msg->delta_step > 0 ? msg->delta_step : 1; 
+
+    for(int i = 0; i<=msg->delta_step; ++i){
+        float t = (float) i / steps;
+        t = t * t * (3.0f - 2.0f * t); // Smoothstep
+        g = initial_g + (uint8_t)(dg*t + 0.5f);
+        r = initial_r + (uint8_t)(dr*t + 0.5f);
+        b = initial_b + (uint8_t)(db*t + 0.5f); 
+
+        for(int j = 0; j < LED_NUMBERS; ++j) {
+        // Build RGB pixels
+        led_strip_pixels[j * 3 + 0] = g;
+        led_strip_pixels[j * 3 + 1] = r;
+        led_strip_pixels[j * 3 + 2] = b; 
+        }
+
+        // Flush GRB values to LEDs and only returns after all have been flushed
+        tx_config.loop_count = 0;
+        ESP_ERROR_CHECK(rmt_transmit(tx_channel, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
+        ESP_ERROR_CHECK(rmt_tx_wait_all_done(tx_channel, portMAX_DELAY));
+        vTaskDelay(pdMS_TO_TICKS(10)); 
+    }
+}
+
+void led_task(void *pvParameters){
+    led_msg_format_t led_msg;
+    while(true){
+        BaseType_t led_received = xQueueReceive(led_msg_queue,&led_msg,portMAX_DELAY);
+        if(led_received == pdTRUE){
+            ESP_LOGI("LED Task","LED DATA");
+            led_control(&led_msg);
+        }
+    }
+}
+
+void gpio_setup(){
+    gpio_config_t gpio_dir_config = {
+        .pin_bit_mask = 1ULL << MOTOR_DIR_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en =  GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&gpio_dir_config));
+
+    gpio_config_t gpio_upper_limit_config = {
+        .pin_bit_mask = 1ULL << UPPER_LIMIT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en =  GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&gpio_upper_limit_config));
+
+    gpio_config_t gpio_lower_limit_config = {
+        .pin_bit_mask = 1ULL << LOWER_LIMIT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en =  GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&gpio_lower_limit_config));  
+}
+
+void motor_task(void *pvParameters){
+    enum MOTOR_STATE{
+        IDLE,
+        CHANGE_DIR,
+        RAMP,
+        AT_SPEED,
+    };
+
+    motor_msg_format_t msg = {
+        .mode = STOP,
+        .dir = CLOCKWISE,
+        .target_freq = SAFEGUARD_LOW_FREQ,
+    };
+
+    uint8_t motor_state = IDLE;
+    uint8_t current_dir = msg.dir;
+    float current_freq = SAFEGUARD_LOW_FREQ;
+    TickType_t wait_time = 0;
+    int64_t initial_time = esp_timer_get_time();
+    while(true){        
+        vTaskDelay(pdMS_TO_TICKS(10));
+        xQueueReceive(motor_msg_queue, &msg, wait_time);
+
+        switch(motor_state){
+            case IDLE:
+                ESP_ERROR_CHECK(ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 0));
+                ESP_ERROR_CHECK(ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0));
+                ESP_LOGI("MOTOR","IDLE");
+                
+                if(msg.mode == STOP){
+                    wait_time = portMAX_DELAY;
+                    break;
+                }
+
+                if(current_dir != msg.dir){
+                    vTaskDelay(pdMS_TO_TICKS(500)); //1000 = 1sec
+                    motor_state = CHANGE_DIR;
+                    wait_time = 0;
+                    break;
+                }
+
+                motor_state = (msg.target_freq == SAFEGUARD_LOW_FREQ) ? AT_SPEED : RAMP;
+                wait_time = 0;
+                initial_time = esp_timer_get_time();
+                ESP_ERROR_CHECK(ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 128));
+                ESP_ERROR_CHECK(ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0));  
+                break;
+
+            case CHANGE_DIR:
+                gpio_set_level(MOTOR_DIR_GPIO, msg.dir);
+                esp_rom_delay_us(5);
+                ESP_LOGI("MOTOR","DIRECTION CHANGE");
+
+                current_dir = msg.dir;
+                motor_state = IDLE;
+                break;
+
+            case AT_SPEED:
+                if(msg.mode == STOP || current_dir != msg.dir){
+                    motor_state = (current_freq == SAFEGUARD_LOW_FREQ) ? IDLE : RAMP;
+                    wait_time = 0;
+                    initial_time = esp_timer_get_time();
+                    break;
+                }
+
+                if(current_freq != msg.target_freq){
+                    motor_state = RAMP;
+                    wait_time = 0;
+                    initial_time = esp_timer_get_time();
+                    break;
+                }
+
+                ESP_LOGI("MOTOR","SPEED REACHED");    
+                wait_time = portMAX_DELAY;
+                break;
+
+            case RAMP:
+                if((msg.mode == STOP || current_dir != msg.dir) && 
+                    current_freq == SAFEGUARD_LOW_FREQ){
+                    motor_state = IDLE;
+                    break;
+                }
+
+                if(current_freq == msg.target_freq && current_dir == msg.dir){
+                    motor_state = AT_SPEED;
+                    break;
+                }
+
+                int64_t final_time = esp_timer_get_time();
+                float dt = (final_time - initial_time) / 1e6f;
+                initial_time = final_time;
+
+                int freq = (current_dir != msg.dir) ? SAFEGUARD_LOW_FREQ : msg.target_freq;
+                int signed_accel = (current_freq < freq) ? msg.accel_mag : -msg.accel_mag;
+
+                current_freq += signed_accel * dt; 
+                if((signed_accel > 0 && current_freq > freq) ||
+                   (signed_accel < 0 && current_freq < freq)){
+                    current_freq = freq;
+                }
+                ESP_ERROR_CHECK(ledc_set_freq(LEDC_HIGH_SPEED_MODE, LEDC_TIMER_0,(uint32_t)current_freq));
+                ESP_LOGI("MOTOR", "ADJUST TO: %f[Hz], target: %d[Hz], saccel: %d, cdir: %d, ndir: %d", current_freq, freq, signed_accel, current_dir, msg.dir);
+                break;        
+        }
+    }
+}
+
+void IRAM_ATTR upper_limit_isr(void* arg){
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    motor_isr_t* data = (motor_isr_t*) arg;
+
+    data->is_upper_limit_reached = pdTRUE;
+    xQueueOverwriteFromISR(data->queue, &e_stop, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+void IRAM_ATTR lower_limit_isr(void* arg){
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    motor_isr_t* data = (motor_isr_t*) arg;
+
+    int only_rev = (data->dir == CLOCKWISE) ? 1: -1;
+    data->motor_revolutions += only_rev;
+
+    if(data->motor_revolutions >= data->max_revolutions){
+        data->is_lower_limit_reached  = pdTRUE;
+        xQueueOverwriteFromISR(data->queue, &e_stop, &xHigherPriorityTaskWoken);
+    }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+void app_main(void){
+    ESP_ERROR_CHECK(nvs_flash_init());
+    
+    wifi_setup();
+    ESP_ERROR_CHECK(esp_now_init());
+
+    rmt_setup();
+    ESP_ERROR_CHECK(rmt_new_led_strip_encoder(&encoder_config, &led_encoder));
+
+    gpio_setup();
+    ESP_ERROR_CHECK(gpio_install_isr_service(0));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(UPPER_LIMIT_GPIO, upper_limit_isr, &isr_data));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(LOWER_LIMIT_GPIO, lower_limit_isr, &isr_data));
+
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+    ESP_ERROR_CHECK(esp_timer_early_init());
+
+    //Recieveing data
+    led_msg_queue = xQueueCreate(1, sizeof(led_msg_format_t));
+    motor_msg_queue = xQueueCreate(1, sizeof(motor_msg_format_t));
+
+    esp_now_register_recv_cb(received_data);
+
+    xTaskCreate(led_task, "LED", 2048, NULL, 1, NULL);
+    xTaskCreate(motor_task, "MOTOR", 2048, NULL, 1, NULL);
+}
