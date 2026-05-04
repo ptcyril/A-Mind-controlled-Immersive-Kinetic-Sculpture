@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "espnow_protocol.h"
+
 #include "esp_wifi.h"
 #include "esp_now.h"
 #include "nvs_flash.h"
@@ -10,37 +12,18 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 
-typedef enum{
-    DEBUG,
-    INFO,
-    ERROR,
-    WARN,
-    SUCCESS
-} log_level_t;
-
-typedef enum{
-    LED_DEVICE,
-    MOTOR_DEVICE
-} device_t;
-
 // ESP MAC addresses
-const uint8_t esp_reciever_mac[] = {0x3C, 0x8A, 0x1F, 0x7F, 0x35, 0x54};
-
-typedef struct __attribute__((packed)){
-    uint8_t target_device;
-    uint8_t R_val;
-    uint8_t G_val;
-    uint8_t B_val;
-} led_msg_format_t;
-
-typedef struct __attribute__((packed)){
-    uint8_t target_device;
-    uint8_t motor_run_status;
-    uint8_t dir;
-    uint16_t delta_time;
-    uint16_t delta_freq;
-    uint32_t target_freq;
-} motor_msg_format_t;
+const uint8_t esp_reciever_mac[9][6] = {
+    {0x3C, 0x8A, 0x1F, 0x76, 0xA3, 0xE8}, // ESP 1
+    {0x3C, 0x8A, 0x1F, 0x7F, 0x35, 0x54}, // ESP 2
+    {0x3C, 0x8A, 0x1F, 0x76, 0xDE, 0x44}, // ESP 3
+    {0x5C, 0x01, 0x3B, 0x73, 0x6C, 0x0C}, // ESP 4
+    {0x3C, 0x8A, 0x1F, 0x77, 0x8F, 0xB0}, // ESP 5
+    {0x3C, 0x8A, 0x1F, 0xA0, 0xE5, 0x74}, // ESP 6
+    {0x3C, 0x8A, 0x1F, 0x77, 0x8C, 0xAC}, // ESP 7
+    {0x3C, 0x8A, 0x1F, 0x77, 0x2C, 0x84}, // ESP 8
+    {0x3C, 0x8A, 0x1F, 0x7E, 0x34, 0xBC}, // ESP 9
+};
 
 void uart_setup(){
     const int uart_buffer_size = 512;
@@ -87,24 +70,11 @@ void espnow_setup(const uint8_t *mac_address){
     ESP_ERROR_CHECK(esp_now_add_peer(&esp));
 }
 
-void gpio_setup(){
-    gpio_config_t io_config = {
-        .pin_bit_mask = 1ULL << 25,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en =  GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-
-    ESP_ERROR_CHECK(gpio_config(&io_config));
-}
-
 void app_main(void){    
     nvs_flash_init();
     uart_setup();
     wifi_setup();
-    espnow_setup(esp_reciever_mac);
-    gpio_setup();
+    espnow_setup(esp_reciever_mac[6]);
 
     uint8_t device;
     led_msg_format_t led_msg;
@@ -115,21 +85,19 @@ void app_main(void){
                                   pdMS_TO_TICKS(10));
         
         if(len == 1){     
-            if(device == LED_DEVICE){
-                led_msg.target_device = LED_DEVICE;
+            if(device == LED_CMD){
+                led_msg.cmd_type = LED_CMD;
                 uart_read_bytes(UART_NUM_0, ((uint8_t*)&led_msg)+1, 
                                 sizeof(led_msg)-1, pdMS_TO_TICKS(10));
-                ESP_ERROR_CHECK(esp_now_send(esp_reciever_mac, 
+                ESP_ERROR_CHECK(esp_now_send(esp_reciever_mac[6], 
                                 (const uint8_t*)&led_msg, sizeof(led_msg)));
-                //ESP_LOGI("SENT", "Device=%d, p1=%d, p2=%d, p3=%d", led_msg.target_device, led_msg.R_val, led_msg.G_val, led_msg.B_val);
             }
-            else if(device == MOTOR_DEVICE){
-                motor_msg.target_device = MOTOR_DEVICE;
+            else if(device == MOTOR_CMD){
+                motor_msg.cmd_type = MOTOR_CMD;
                 len = uart_read_bytes(UART_NUM_0, ((uint8_t*)&motor_msg)+1, 
                                 sizeof(motor_msg)-1,pdMS_TO_TICKS(20));
-                ESP_ERROR_CHECK(esp_now_send(esp_reciever_mac, 
+                ESP_ERROR_CHECK(esp_now_send(esp_reciever_mac[6], 
                                 (const uint8_t*)&motor_msg, sizeof(motor_msg)));
-                //ESP_LOGI("SENT", "Device=%d, p1=%d, p2=%u, p3=%u", motor_msg.target_device, motor_msg.dir, motor_msg.tot_step, motor_msg.freq);
             }
         }
     }
