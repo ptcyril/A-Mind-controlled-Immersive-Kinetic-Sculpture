@@ -192,7 +192,6 @@ void motor_control(uint8_t motor_run_status, uint8_t new_direction, uint16_t del
             if(current_freq<SAFEGUARD_LOW_FREQ){
                 current_freq = SAFEGUARD_LOW_FREQ;
             }
-            ESP_LOGI("CHECKPOINT","SHOULD BE DECREMENTING");
             ESP_ERROR_CHECK(ledc_set_freq(LEDC_HIGH_SPEED_MODE, LEDC_TIMER_0,current_freq));
             vTaskDelay(delta_time / portTICK_PERIOD_MS);
             ESP_LOGI("FREQ ","%d",current_freq);
