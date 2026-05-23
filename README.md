@@ -91,6 +91,7 @@ Last update: 2/12/2026
 	Control Application:
 
 		https://github.com/TomSchimansky/CustomTkinter
+		
 		https://github.com/Akascape/CTkColorPicker/blob/main/CTkColorPicker/ctk_color_picker_widget.py
 
 	References:
@@ -185,56 +186,49 @@ Last update: 2/12/2026
 
 ## Notes
 Last update: 5/1/2026
-	- Tested up to **1200 rpm** at a **microstep setting of 2000**.
-	- Achieved maximum speed **without the panel attached**.
-	- Motor was run for **~12 minutes**, simulating finalized usage.
- 	 - Motor temperature reached **~140°F**.
-	- LED strip was operable while the motor was running.
 
-## ESP32 Receiver Issue
+	Testing:
+		- Tested up to 1200 rpm at a microstep setting of 2000.
+		- Achieved maximum speed without the panel attached.
+		- Motor reached ~140°F running for ~12 minutes simulating finalized usage.
+		- LED strip was operable while the motor was running.
 
-- An error occurred where received motor data had an **extra byte**.
-- Issue was temporarily fixed after modifications to the ESP32 transmitter code.
-- Eventually, the problem resolved itself without clear explanation.
+	ESP32 receiver issue:
+		- An error occurred where received motor data had an **extra byte**.
+		- Issue was temporarily fixed after modifications to the ESP32 transmitter code.
+		- Eventually, the problem resolved itself without clear explanation.
 
-## Previous Control Methods
+	Previous motor control methods:
+	
+		RMT:
+ 			- Looping feature did not work, increasing CPU load.
+ 		 	- Likely cause: outdated ESP-WROOM-32 module or missing RMT encoder looping support.
+		GPTimer:
+ 		 	- Could not toggle GPIO for required frequencies correctly.
+			- Possible useable with more effort.
+		MCPWM:
+  			- Required complex setup.
+  			- Potentially usable with more effort.
 
-- **RMT**:
-  - Looping feature did not work, increasing CPU load.
-  - Likely cause: outdated ESP-WROOM-32 module or missing RMT encoder looping support.
-- **GPTimer**:
-  - Could not toggle GPIO for required frequencies correctly.
-- **MCPWM**:
-  - Required complex setup.
-  - Potentially usable with more effort.
+	Current control method:
+		LEDC API:
+  			- Easy to set up and meets current requirements.
+ 			- Recommended to continue using LEDC until issues arise.
 
-## Current Control Method
+	Design Improvements:
+		Modularity:
+			- No Arduino needed; ESP32 controls both LED strip and stepper motor.
+			- In theory only power wires run between panels, improving modularity.
+		Reduced latency:
+ 			- Control application and signal processing module are on the same computer.
+			- Eliminates wifi latency from mobile device to the ESP32 receiver.
+		Wireless stability:
+  			- ESPNOW used for ESP32 transmitter-to-receiver communication.
+ 			- UART used for computer-to-ESP32 transmitter communication.
 
-- **LEDC API** from Espressif:
-  - Easy to set up and meets current requirements.
-  - Recommended to continue using LEDC until issues arise.
-  - Future exploration of GPTimer and MCPWM is suggested.
-
-## Design Improvements
-
-- No Arduino needed; ESP32 controls both LED strip and stepper motor.
-- Power wires run **between panels only**, improving modularity.
-- **Reduced latency**:
-  - Control application and signal processing module are on the same computer.
-  - Eliminates wireless latency from mobile device to ESP32.
-- **Wireless stability**:
-  - ESPNOW used for ESP32 transmitter-to-receiver communication.
-  - Lower latency and more stable than mobile-to-ESP32 connection.
-
-## Future Work
-
-- Implement **pairing mode** for ESP32 transmitter and receiver without hardcoding MAC addresses.
-- Allow dynamic adjustment of:
-  - Wire length (if still relevant in motor code)
-  - Microstep factor
-- Further development and testing required for:
-  - LED, motor, and audio systems
-  - GUI refinement for intuitive control
-- Implement **fail-safe detection**:
-  - Detect stalling or rewinding into panel
-  - Measure current or back EMF for safety
+	Future Work:
+		- Implement pairing mode for ESP32 transmitter and receiver without hardcoding MAC addresses.
+		- Allow dynamic adjustment of wire length (if still relevant in motor code) and microstep factor.
+		- Further development and testing required for LED, motor, and audio systems.
+  		- GUI refinement for intuitive control.
+		- Implement fail-safe detection to detect stalling or rewinding into panel by measuring current or back EMF.
