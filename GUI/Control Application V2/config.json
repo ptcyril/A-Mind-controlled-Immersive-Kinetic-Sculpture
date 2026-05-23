@@ -1,0 +1,31 @@
+{
+    "dancer1": {
+        "Alpha 8-12 [Hz]": {
+            "Panel 1": {
+                "modules": {
+                    "led": {
+                        "color": "#ff0000",
+                        "fade": 255
+                    }
+                }
+            }
+        }
+    },
+    "synch": {
+        "Gamma 30-50 [Hz]": {
+            "audio": {
+                "file": "C_sharp.wav"
+            },
+            "Panel 5": {
+                "modules": {
+                    "motor": {
+                        "acceleration": 5000,
+                        "speed": 100,
+                        "direction": "0",
+                        "height": 3
+                    }
+                }
+            }
+        }
+    }
+}
