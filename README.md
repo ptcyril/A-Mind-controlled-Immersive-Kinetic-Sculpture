@@ -185,19 +185,56 @@ Last update: 2/12/2026
 
 ## Notes
 Last update: 5/1/2026
+	- Tested up to **1200 rpm** at a **microstep setting of 2000**.
+	- Achieved maximum speed **without the panel attached**.
+	- Motor was run for **~12 minutes**, simulating finalized usage.
+ 	 - Motor temperature reached **~140°F**.
+	- LED strip was operable while the motor was running.
 
-	Tested stepper motor up to 1200 [rpm] at a micro step setting of 2000. The Stepper motor achieved this speed without the panel attached.
-	
-	Stepper motor was left running for approximately 12 minutes, with movements simulating finalized usage, and the motor reached temperatures of approximately 140 Fahrenheit.  
+## ESP32 Receiver Issue
 
-	The LED strip was able to be changed while stepper motor is actively moving.
+- An error occurred where received motor data had an **extra byte**.
+- Issue was temporarily fixed after modifications to the ESP32 transmitter code.
+- Eventually, the problem resolved itself without clear explanation.
 
-	There was an error on the ESP32 receiver side where the received motor data had an extra byte of data. This error was somehow fixed but unknown how, some alterations were made to the ESP32 transmitter code but eventually were reverted and the issue resolved itself.
+## Previous Control Methods
 
-	Previous attempts to control the stepper motor used the Espressif RMT, GPTimer, and MCPWM API. The issue with RMT is that the RMT looping feature did not work and not using that feature increased load on CPU. Most likely cause was either provided RMT encoder from Espressif not enabling the looping feature or the ESP-WROOM-32 modules not supporting looping because they are outdated. GPTimer could not be correctly implemented to toggle the GPIO for the required frequencies. It is possible that RMT could be used to control the stepper motor. MCPWM required a lot more setup to get correctly working. It is possible that MCPWM could be used to control the stepper motor. 
+- **RMT**:
+  - Looping feature did not work, increasing CPU load.
+  - Likely cause: outdated ESP-WROOM-32 module or missing RMT encoder looping support.
+- **GPTimer**:
+  - Could not toggle GPIO for required frequencies correctly.
+- **MCPWM**:
+  - Required complex setup.
+  - Potentially usable with more effort.
 
-	The current method to control the stepper motor used the Espressif LEDC API. This method is easy to setup, use, and fulfills current requirements. It is recommended to continue usage of LEDC until a issue appears to continue exploring GPTimer and MCPWM along with other possible methods. 
+## Current Control Method
 
-	This design for the sculpture should allow for greater modularity as the use of an Arduino to control the stepper motors is no longer needed, the ESP32 controlling both the LED strip and the stepper motor just leaves the power wires to run between panels. It should also allow for more real time responses as the control application has been moved to the same computer as the signal processing module, removing the latency of wireless communication between the signal processing module on the computer to the control application on a mobile device. It should also be a more stable low latency wireless connection using ESPNOW between a transmitter and receiver ESP32 than between the mobile device and the receiver ESP32.
+- **LEDC API** from Espressif:
+  - Easy to set up and meets current requirements.
+  - Recommended to continue using LEDC until issues arise.
+  - Future exploration of GPTimer and MCPWM is suggested.
 
-	Overall this should be a good platform for future teams to further develop the project but work is still required. For example a pairing mode to connect the ESP32 transmitter to the ESP32 Receiver without requiring hardcoding of the mac address and reflashing should be developed. The length of wire, if that is still a known parameter in the motor code, and the micro step factor should also be changeable without reflashing. The control application requires further development and testing of the LED, motor, and audio systems along with refinement of the GUI to make it intuitive. It has also been recommended by IAB board judges to include a fail safe to detect if the stepper motor is stalling or rewinding into the panel by measuring the current or back EMF. 
+## Design Improvements
+
+- No Arduino needed; ESP32 controls both LED strip and stepper motor.
+- Power wires run **between panels only**, improving modularity.
+- **Reduced latency**:
+  - Control application and signal processing module are on the same computer.
+  - Eliminates wireless latency from mobile device to ESP32.
+- **Wireless stability**:
+  - ESPNOW used for ESP32 transmitter-to-receiver communication.
+  - Lower latency and more stable than mobile-to-ESP32 connection.
+
+## Future Work
+
+- Implement **pairing mode** for ESP32 transmitter and receiver without hardcoding MAC addresses.
+- Allow dynamic adjustment of:
+  - Wire length (if still relevant in motor code)
+  - Microstep factor
+- Further development and testing required for:
+  - LED, motor, and audio systems
+  - GUI refinement for intuitive control
+- Implement **fail-safe detection**:
+  - Detect stalling or rewinding into panel
+  - Measure current or back EMF for safety
