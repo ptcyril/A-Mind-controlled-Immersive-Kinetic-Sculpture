@@ -181,7 +181,7 @@ void gpio_setup(){
 }
 
 void motor_control(uint8_t motor_run_status, uint8_t new_direction, uint16_t delta_time, uint16_t delta_freq, uint32_t target_freq){ 
-    // Flow chart provided in github titled "Motor control flow chart.pptx"
+    // Flow chart provided in github titled "V1 Motor control flow chart.pptx"
     ESP_LOGI("ENTER","MOTOR_CONTROL");
     uint32_t current_freq = ledc_get_freq(LEDC_HIGH_SPEED_MODE, LEDC_TIMER_0);
     
