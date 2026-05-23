@@ -1,6 +1,4 @@
-# A-Mind-controlled-Immersive-Kinetic-Sculpture
-
-Documentation for An Immersive Mind-Controlled Kinetic Sculpture
+ESP-WROOM-32 Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 
 	Acknowledgment:
 
@@ -12,8 +10,9 @@ Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 		Project licenses
 		Program architecture
 		References
-		Testing notes	
-
+		Notes
+	
+ESP-IDF Visual Studio code installation and setup guide
 # Last update: 2/12/2026
 
 	To install the ESP32 extension for Visual Studio Code follow the guide provided below:
@@ -57,39 +56,36 @@ Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 
 		Go to View > Command Palette and type "ESP-IDF: Flash your Project": Select UART
 	
-
+Project licenses
 # Last update: 2/12/2026
 
-	Licenses:
+	Control application uses CustomTkinter by Tom Schimansky (MIT License)
+				 CTkColorPicker by Akascape (CC0 1.0 Universal).
 
-		Control application uses CustomTkinter by Tom Schimansky (MIT License)
-					 CTkColorPicker by Akascape (CC0 1.0 Universal).
+	ESP32 Transmitter and Receiver bases code from examples by 
+	Espressif Systems (Shanghai) CO LTD, 2021-2022, licensed under Unlicense or CC0-1.0.
 
-		ESP32 Transmitter and Receiver bases code from examples by 
-		Espressif Systems (Shanghai) CO LTD, 2021-2022, licensed under Unlicense or CC0-1.0.
+	Signal Processing Module by previous team (https://github.com/Neural-Kinetic-Sculpture)
 
-		Signal Processing Module by previous team (https://github.com/Neural-Kinetic-Sculpture)
-
-
+Program architecture
 # Last update: 5/1/2026
 
-	Program Architecture:
+	Control Application:
 
-		Control Application:
+		User sets manual input -> Transmit panel data to transmitter ESP32
 
-			User sets manual input -> Transmit panel data to transmitter ESP32
+		User sets preset config -> Read EEG data -> Determine input from config -> Transmit audio to theater audio system
+											-> Transmit LED/motor to transmitter ESP32
 
-			User sets preset config -> Read EEG data -> Determine input from config -> Transmit audio to theater audio system
-												-> Transmit LED/motor to transmitter ESP32
+	Transmitter ESP32:
 
-		Transmitter ESP32:
+		Receive data from UART -> Determine panel -> Transmit data to panel receiver ESP32
 
-			Receive data from UART -> Determine panel -> Transmit data to panel receiver ESP32
+	Receiver ESP32:
 
-		Receiver ESP32:
-
-			Receive data from ESPNOW -> send data to queue -> pull data from queue -> control panel LED/Motor 
-
+		Receive data from ESPNOW -> send data to queue -> pull data from queue -> control panel LED/Motor
+ 
+References
 # Last update: 2/12/2026
 
 	Control Application:
@@ -187,9 +183,8 @@ Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 		|     125    |   25000   |    500000    |     480     |
 		+------------+-----------+--------------+-------------+
 
+Notes
 # Last update: 5/1/2026
-
-	Notes:
 
 	Tested stepper motor up to 1200 [rpm] at a micro step setting of 2000. The Stepper motor achieved this speed without the panel attached.
 	
@@ -205,4 +200,4 @@ Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 
 	This design for the sculpture should allow for greater modularity as the use of an Arduino to control the stepper motors is no longer needed, the ESP32 controlling both the LED strip and the stepper motor just leaves the power wires to run between panels. It should also allow for more real time responses as the control application has been moved to the same computer as the signal processing module, removing the latency of wireless communication between the signal processing module on the computer to the control application on a mobile device. It should also be a more stable low latency wireless connection using ESPNOW between a transmitter and receiver ESP32 than between the mobile device and the receiver ESP32.
 
-Overall this should be a good platform for future teams to further develop the project but work is still required. For example a pairing mode to connect the ESP32 transmitter to the ESP32 Receiver without requiring hardcoding of the mac address and reflashing should be developed. The length of wire, if that is still a known parameter in the motor code, and the micro step factor should also be changeable without reflashing. The control application requires further development and testing of the LED, motor, and audio systems along with refinement of the GUI to make it intuitive. It has also been recommended by IAB board judges to include a fail safe to detect if the stepper motor is stalling or rewinding into the panel by measuring the current or back EMF. 
+	Overall this should be a good platform for future teams to further develop the project but work is still required. For example a pairing mode to connect the ESP32 transmitter to the ESP32 Receiver without requiring hardcoding of the mac address and reflashing should be developed. The length of wire, if that is still a known parameter in the motor code, and the micro step factor should also be changeable without reflashing. The control application requires further development and testing of the LED, motor, and audio systems along with refinement of the GUI to make it intuitive. It has also been recommended by IAB board judges to include a fail safe to detect if the stepper motor is stalling or rewinding into the panel by measuring the current or back EMF. 
