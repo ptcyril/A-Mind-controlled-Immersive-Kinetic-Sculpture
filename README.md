@@ -1,7 +1,7 @@
 # ESP-WROOM-32 Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 
 	Acknowledgment:
-.
+
 		Previous Team (https://github.com/Neural-Kinetic-Sculpture)
 
 	Table of Contents:
