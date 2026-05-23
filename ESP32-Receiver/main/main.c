@@ -26,8 +26,7 @@
 #define MOTOR_PUL_GPIO 33 // BLUE wire
 #define MOTOR_DIR_GPIO 19 // ORANGE wire
 
-#define UPPER_LIMIT_GPIO 18
-#define LOWER_LIMIT_GPIO 26
+#define HALL_EFFECT_SENSOR_GPIO 26
 
 #define MICROSTEP 2000
 #define SAFEGUARD_LOW_FREQ 400
@@ -45,16 +44,15 @@ typedef struct{
     volatile int direction;
     volatile int max_rev;
     volatile int rev;
-    volatile BaseType_t is_lower_limit_reached;
+    volatile int num_rev;
     QueueHandle_t queue;
 } motor_isr_t;
 
 motor_isr_t isr_data = {
     .direction = CLOCKWISE,
-    .max_rev = 12,
-
+    .max_rev = 22,
     .rev = 0,
-    .is_lower_limit_reached = pdFALSE,
+    .num_rev = 3,
 };
 
 TaskHandle_t motor_stop_task_handle = NULL;
@@ -98,7 +96,7 @@ void wifi_setup(){
 
 void received_data(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len){
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    if(data_len == sizeof(led_msg_format_t)){ // NEEDS TO BE FIXED
+    if(data_len == sizeof(led_msg_format_t)){
         led_msg_format_t led_msg;
         memcpy(&led_msg, data, sizeof(led_msg_format_t));
 
@@ -167,7 +165,7 @@ void led_control(led_msg_format_t *msg){
         tx_config.loop_count = 0;
         ESP_ERROR_CHECK(rmt_transmit(tx_channel, led_encoder, led_strip_pixels, sizeof(led_strip_pixels), &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(tx_channel, portMAX_DELAY));
-        vTaskDelay(pdMS_TO_TICKS(1)); 
+        vTaskDelay(pdMS_TO_TICKS(20)); 
     }
 }
 
@@ -192,14 +190,14 @@ void gpio_setup(){
     };
     ESP_ERROR_CHECK(gpio_config(&gpio_dir_config));
 
-    gpio_config_t gpio_lower_limit_config = {
-        .pin_bit_mask = 1ULL << LOWER_LIMIT_GPIO,
+    gpio_config_t gpio_hall_effect_sensor_config = {
+        .pin_bit_mask = 1ULL << HALL_EFFECT_SENSOR_GPIO,
         .mode = GPIO_MODE_INPUT,
         .pull_up_en =  GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_NEGEDGE,
     };
-    ESP_ERROR_CHECK(gpio_config(&gpio_lower_limit_config));  
+    ESP_ERROR_CHECK(gpio_config(&gpio_hall_effect_sensor_config));  
 }
 
 void motor_task(void *pvParameters){
@@ -207,160 +205,159 @@ void motor_task(void *pvParameters){
         CHANGE_DIR,
         IDLE,
         RAMP,
-        AT_SPEED,
     };
 
     motor_msg_format_t msg = {
         .mode = STOP,
         .dir = CLOCKWISE,
         .target_freq = SAFEGUARD_LOW_FREQ,
+        .num_rev = 0,
     };
-    motor_msg_format_t last_msg = msg;
+
     uint8_t motor_state = IDLE;
     uint8_t current_dir = msg.dir;
+
     float current_freq = SAFEGUARD_LOW_FREQ;
+
     TickType_t wait_time = 0;
     int64_t initial_time = esp_timer_get_time();
 
-    float decel_rev = 0.0f;
-    float safety_margin = 0.0f;
+    float start_rev = 0.0f;
+    float target_rev = 0.0f;
 
     while(true){        
         vTaskDelay(pdMS_TO_TICKS(10));
-        ESP_LOGI("MOTOR","rev:%d", isr_data.rev);
+
+        float current_rev = (float)isr_data.rev / NUM_MAGNETS;
+        ESP_LOGI("MOTOR","rev:%f", current_rev);
         if(xQueueReceive(motor_msg_queue, &msg, wait_time) == pdTRUE){
-            ESP_LOGI("MOTOR", "ADJUST TO: m:%d, dir:%d, a:%d, f:%d", msg.mode,msg.dir, msg.accel_mag, msg.target_freq);
-            float stop_speed_sq = SAFEGUARD_LOW_FREQ * SAFEGUARD_LOW_FREQ;
-            float target_speed_sq = msg.target_freq * msg.target_freq;
-            float current_speed_sq = current_freq * current_freq;
-            float denom = 2.0f * msg.accel_mag * MICROSTEP;
+            ESP_LOGI("MOTOR","mode:%d, dir:%d, rev:%d, accel:%d, freq:%d", msg.mode, msg.dir, msg.num_rev, msg.accel_mag, msg.target_freq);
             
-            float delta_rev;
-            if(current_dir == msg.dir){
-                delta_rev = fabsf(target_speed_sq - current_speed_sq) / denom;
-            }
-            else if(current_dir != msg.dir){
-                delta_rev = (current_speed_sq - stop_speed_sq) / denom + 
-                            (target_speed_sq - stop_speed_sq) / denom;
+            gpio_set_level(MOTOR_DIR_GPIO, msg.dir);
+            esp_rom_delay_us(5);
+
+            start_rev = current_rev;
+
+            if(msg.dir == CLOCKWISE){
+                target_rev = start_rev + msg.num_rev;
+            } else {
+                target_rev = start_rev - msg.num_rev;
             }
 
-            decel_rev = fabsf(target_speed_sq - stop_speed_sq) / denom;
-            float req_rev = delta_rev + decel_rev;
-            safety_margin = (1.0f / NUM_MAGNETS) + 
-                                  (current_freq / MICROSTEP) * 0.01f + 0.02f;
+            current_dir = msg.dir;
+            isr_data.direction = msg.dir;
 
-            float remaining_rev = (msg.dir == CLOCKWISE) ? 
-                            (isr_data.max_rev - isr_data.rev) :
-                            (isr_data.rev);
+            motor_state = RAMP;
+            wait_time = 0;
+            initial_time = esp_timer_get_time();
 
-            if(req_rev + safety_margin >= remaining_rev){
-                msg = last_msg;
-            }
-            else{
-                last_msg = msg;
-            }
+            ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 128);
+            ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
         }
 
         switch(motor_state){
+
             case IDLE:
-                ESP_ERROR_CHECK(ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 0));
-                ESP_ERROR_CHECK(ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0));
-                ESP_LOGI("MOTOR","IDLE");
-                
-                if(msg.mode == STOP || (msg.dir == CLOCKWISE && isr_data.rev == isr_data.max_rev) || (msg.dir == COUNTER_CLOCKWISE && isr_data.rev == 0)){
-                    wait_time = portMAX_DELAY;
-                    break;
-                }
-
-                if(current_dir != msg.dir){
-                    vTaskDelay(pdMS_TO_TICKS(500)); //1000 = 1sec
-                    motor_state = CHANGE_DIR;
-                    wait_time = 0;
-                    break;
-                }
-
-                motor_state = (msg.target_freq == SAFEGUARD_LOW_FREQ) ? AT_SPEED : RAMP;
-                wait_time = 0;
-                initial_time = esp_timer_get_time();
-                ESP_ERROR_CHECK(ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 128));
-                ESP_ERROR_CHECK(ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0));  
+                ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 0);
+                ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+                wait_time = portMAX_DELAY;
                 break;
 
             case CHANGE_DIR:
                 gpio_set_level(MOTOR_DIR_GPIO, msg.dir);
                 esp_rom_delay_us(5);
-                ESP_LOGI("MOTOR","DIRECTION CHANGE");
 
                 current_dir = msg.dir;
                 isr_data.direction = msg.dir;
                 motor_state = IDLE;
                 break;
 
-            case AT_SPEED:
-                if(msg.mode == STOP && current_freq == SAFEGUARD_LOW_FREQ){
-                    motor_state = IDLE;
-                    initial_time = esp_timer_get_time();
-                    break;
-                }
-
-                if((current_dir == CLOCKWISE && isr_data.rev >= (isr_data.max_rev - decel_rev - safety_margin)) || 
-                   (current_dir == COUNTER_CLOCKWISE && isr_data.rev <= (decel_rev + safety_margin)) ||
-                   (current_dir != msg.dir && current_freq == SAFEGUARD_LOW_FREQ) ||
-                   (current_freq != msg.target_freq)){
-                    motor_state = RAMP;
-                    initial_time = esp_timer_get_time();
-                    break;
-                }
-                ESP_LOGI("MOTOR", "frequency reach:%f", current_freq);
-                ESP_LOGI("MOTOR","SPEED REACHED");    
-                break;
-
-            case RAMP:
-                if((msg.mode == STOP || current_dir != msg.dir || 
-                    (current_dir == CLOCKWISE && isr_data.rev >= (isr_data.max_rev - decel_rev - safety_margin)) ||
-                    (current_dir == COUNTER_CLOCKWISE && isr_data.rev <= (decel_rev + safety_margin))) && 
-                    current_freq == SAFEGUARD_LOW_FREQ){
-                    motor_state = IDLE;
-                    break;
-                }
-
-                int freq;
-                if((current_dir == CLOCKWISE && isr_data.rev >= (isr_data.max_rev - decel_rev - safety_margin)) ||
-                   (current_dir == COUNTER_CLOCKWISE && isr_data.rev <= (decel_rev + safety_margin)) ||
-                   (current_dir != msg.dir)){
-                    freq = SAFEGUARD_LOW_FREQ;
-                }
-                else{
-                    freq = msg.target_freq;
-                }
+            case RAMP: {
 
                 int64_t final_time = esp_timer_get_time();
                 float dt = (final_time - initial_time) / 1e6f;
                 initial_time = final_time;
 
-                int signed_accel = (current_freq < freq) ? msg.accel_mag : -msg.accel_mag;
+                current_rev = (float)isr_data.rev / NUM_MAGNETS;
 
-                current_freq += signed_accel * dt; 
-                if((signed_accel > 0 && current_freq > freq) ||
-                   (signed_accel < 0 && current_freq < freq)){
-                    current_freq = freq;
-                }
-                ESP_ERROR_CHECK(ledc_set_freq(LEDC_HIGH_SPEED_MODE, LEDC_TIMER_0,(uint32_t)current_freq));
+                float remaining_rev;
 
-                if(current_freq == msg.target_freq && current_dir == msg.dir){
-                    motor_state = AT_SPEED;
+                if(current_dir == CLOCKWISE){
+                    remaining_rev = target_rev - current_rev;
+                } else {
+                    remaining_rev = current_rev - target_rev;
                 }
-                break;        
+
+                if(remaining_rev < 0) remaining_rev = 0;
+
+                if (remaining_rev <= 0.0f){
+                    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 0);
+                    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+                    motor_state = IDLE;
+                    break;
+                }
+
+                float d_stop = (current_freq * current_freq) /
+                               (2.0f * msg.accel_mag * MICROSTEP);
+
+                float max_freq = sqrtf(2.0f * msg.accel_mag * MICROSTEP * remaining_rev);
+
+                if(max_freq < SAFEGUARD_LOW_FREQ){
+                    max_freq = SAFEGUARD_LOW_FREQ;
+                }
+
+                float desired_freq = msg.target_freq;
+                if(desired_freq > max_freq){
+                    desired_freq = max_freq;
+                }
+
+                float target_freq;
+
+                if(msg.mode == STOP || remaining_rev <= 0){
+                    target_freq = SAFEGUARD_LOW_FREQ;
+                }
+                else if(d_stop >= remaining_rev){
+                    // must brake
+                    target_freq = SAFEGUARD_LOW_FREQ;
+                }
+                else{
+                    target_freq = desired_freq;
+                }
+
+                float signed_accel = (current_freq < target_freq) ? 
+                                      msg.accel_mag : -msg.accel_mag;
+
+                current_freq += signed_accel * dt;
+
+                // clamp overshoot
+                if((signed_accel > 0 && current_freq > target_freq) ||
+                   (signed_accel < 0 && current_freq < target_freq)){
+                    current_freq = target_freq;
+                }
+
+                if(current_freq < SAFEGUARD_LOW_FREQ){
+                    current_freq = SAFEGUARD_LOW_FREQ;
+                }
+
+                ledc_set_freq(LEDC_HIGH_SPEED_MODE, LEDC_TIMER_0,
+                              (uint32_t)current_freq);
+
+                if(current_freq == SAFEGUARD_LOW_FREQ && remaining_rev <= 0){
+                    motor_state = IDLE;
+                }
+                break;
+            }
         }
     }
 }
 
-void IRAM_ATTR limit_isr(void* arg){
+void IRAM_ATTR rev_counter_isr(void* arg){
     motor_isr_t* data = (motor_isr_t*) arg;
 
     if(data->direction == CLOCKWISE){
         data->rev++;
-    } else {
+    } 
+    else {
         data->rev--;
     }
 }
@@ -376,7 +373,7 @@ void app_main(void){
 
     gpio_setup();
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(LOWER_LIMIT_GPIO, limit_isr, &isr_data));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(HALL_EFFECT_SENSOR_GPIO, rev_counter_isr, &isr_data));
 
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
