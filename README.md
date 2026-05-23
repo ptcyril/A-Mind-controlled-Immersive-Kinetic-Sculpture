@@ -12,7 +12,7 @@
 		References
 		Notes
 	
-# ESP-IDF Visual Studio code installation and setup guide
+## ESP-IDF Visual Studio code installation and setup guide
 Last update: 2/12/2026
 
 	To install the ESP32 extension for Visual Studio Code follow the guide provided below:
@@ -56,7 +56,7 @@ Last update: 2/12/2026
 
 		Go to View > Command Palette and type "ESP-IDF: Flash your Project": Select UART
 	
-# Project licenses
+## Project licenses
 Last update: 2/12/2026
 
 	Control application uses CustomTkinter by Tom Schimansky (MIT License)
@@ -67,7 +67,7 @@ Last update: 2/12/2026
 
 	Signal Processing Module by previous team (https://github.com/Neural-Kinetic-Sculpture)
 
-# Program architecture
+## Program architecture
 Last update: 5/1/2026
 
 	Control Application:
@@ -85,7 +85,7 @@ Last update: 5/1/2026
 
 		Receive data from ESPNOW -> send data to queue -> pull data from queue -> control panel LED/Motor
  
-# References
+## References
 Last update: 2/12/2026
 
 	Control Application:
@@ -183,7 +183,7 @@ Last update: 2/12/2026
 		|     125    |   25000   |    500000    |     480     |
 		+------------+-----------+--------------+-------------+
 
-# Notes
+## Notes
 Last update: 5/1/2026
 
 	Tested stepper motor up to 1200 [rpm] at a micro step setting of 2000. The Stepper motor achieved this speed without the panel attached.
