@@ -1,4 +1,4 @@
-ESP-WROOM-32 Documentation for An Immersive Mind-Controlled Kinetic Sculpture
+# ESP-WROOM-32 Documentation for An Immersive Mind-Controlled Kinetic Sculpture
 
 	Acknowledgment:
 
