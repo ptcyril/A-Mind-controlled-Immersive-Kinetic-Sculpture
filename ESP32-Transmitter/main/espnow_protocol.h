@@ -42,10 +42,11 @@ typedef uint8_t motor_dir_t;
 #define CLOCKWISE 0
 #define COUNTER_CLOCKWISE 1
 
-typedef struct __attribute__((packed)){ // 9 bytes
+typedef struct __attribute__((packed)){ // 10 bytes
     device_cmd_t cmd_type;
     motor_mode_t mode;
     motor_dir_t dir;
+    uint8_t num_rev;
     uint16_t accel_mag;
     uint32_t target_freq;
 } motor_msg_format_t;
