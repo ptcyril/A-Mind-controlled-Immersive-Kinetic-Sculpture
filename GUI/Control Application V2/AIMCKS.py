@@ -109,6 +109,7 @@ class PerformanceController:
         self.running = False
 
     def loop(self):
+    """Goal: Recieve dominant EEG Brainwave frequency and execute from config"""
         while self.running:
             try:
                 with open("config.json", "r") as f:
